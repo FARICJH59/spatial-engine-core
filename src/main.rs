@@ -1,7 +1,6 @@
 mod parser;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Vector3D {
@@ -38,8 +37,8 @@ fn main() {
     match serde_json::from_str::<SceneNode>(sample_json) {
         Ok(node) => {
             println!("Successfully parsed entity: {}", node.object_id);
-            // Validate scale using our parser module
-            match parser::mod_::validate_scale(node.scale.x, node.scale.y, node.scale.z) {
+            // Validate scale directly using the parser module namespace
+            match parser::validate_scale(node.scale.x, node.scale.y, node.scale.z) {
                 Ok(()) => println!("Scale validation passed: dimensions are valid."),
                 Err(e) => eprintln!("Scale validation failed: {}", e),
             }

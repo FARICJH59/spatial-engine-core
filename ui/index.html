@@ -101,12 +101,9 @@
         setInterval(syncSceneGraph, 1500);
         syncSceneGraph();
 
-        // Handle Generative Prompt Button
         document.getElementById('prompt-btn').addEventListener('click', async () => {
             const promptText = document.getElementById('prompt-input').value;
             const count = activeMeshes.size + 1;
-            
-            // Derive category and appearance from prompt content
             let category = "Shrine";
             if (promptText.toLowerCase().includes("lantern")) category = "Lantern";
             if (promptText.toLowerCase().includes("tower") || promptText.toLowerCase().includes("pagoda")) category = "Pagoda";
@@ -119,10 +116,12 @@
                 position: { x: (Math.random() - 0.5) * 8, y: 0, z: (Math.random() - 0.5) * 8 },
                 scale: { x: 1.0, y: 1.0, z: 1.0 },
                 orientation: { x: 0.0, y: 0.0, z: 0.0 },
-                lighting_state: "Day"
+                lighting_state: "Day",
+                timestamp: Date.now(),
+                client_id: "termux_web_client"
             };
 
-            await fetch('http://127.0.0.1:3000/api/spawn', {
+            await fetch('http://127.0.0.1:3000/api/sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(newNode)

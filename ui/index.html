@@ -3,47 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spatial Engine Core - 3D Visualizer</title>
+    <title>Spatial Engine Core - Dynamic 3D Renderer</title>
     <style>
         body { margin: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; }
-        #hud { position: absolute; top: 20px; left: 20px; background: rgba(15, 23, 42, 0.85); padding: 15px; border-radius: 8px; border: 1px solid #334155; width: 320px; pointer-events: auto; }
+        #hud { position: absolute; top: 20px; left: 20px; background: rgba(15, 23, 42, 0.9); padding: 15px; border-radius: 8px; border: 1px solid #334155; width: 340px; pointer-events: auto; }
         h3 { margin: 0 0 10px 0; font-size: 16px; color: #38bdf8; }
-        pre { background: #020617; padding: 10px; border-radius: 4px; font-size: 11px; overflow-x: auto; color: #4ade80; max-height: 150px; }
+        pre { background: #020617; padding: 10px; border-radius: 4px; font-size: 11px; overflow-x: auto; color: #4ade80; max-height: 180px; }
         button { background: #0284c7; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; margin-top: 5px; width: 100%; font-weight: bold; }
         button:hover { background: #0ea5e9; }
         #canvas-container { width: 100vw; height: 100vh; }
     </style>
-    <!-- Three.js CDN for 3D Viewport Rendering -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
     <div id="hud">
         <h3>Spatial Engine 4D Telemetry</h3>
-        <p style="font-size: 12px; color: #94a3b8;">Active Object: <span id="obj-id">lantern_001</span></p>
-        <pre id="json-stream">{
-  "object_id": "lantern_001",
-  "object_category": "Lantern",
-  "position": { "x": 0, "y": 0, "z": 0 },
-  "lighting": "Day"
-}</pre>
+        <p style="font-size: 12px; color: #94a3b8;">Backend Engine: <span id="status" style="color: #facc15;">Connecting to Rust...</span></p>
+        <pre id="json-stream">Fetching active scene graph...</pre>
+        <button id="spawn-btn">Spawn Entity via Engine API</button>
         <button id="toggle-time">Toggle 4D Night Mode</button>
     </div>
     <div id="canvas-container"></div>
 
     <script>
-        // Initialize Three.js Scene
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0f172a);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 3, 5);
+        camera.position.set(0, 5, 8);
         camera.lookAt(0, 0, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        // Add Lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambientLight);
 
@@ -51,18 +44,77 @@
         dirLight.position.set(5, 10, 7);
         scene.add(dirLight);
 
-        // Procedural Lantern Placeholder Mesh (representing the AI object)
-        const geometry = new THREE.CylinderGeometry(0.6, 0.6, 1.5, 32);
-        const material = new THREE.MeshStandardMaterial({ color: 0xd9381e, roughness: 0.3 });
-        const lantern = new THREE.Mesh(geometry, material);
-        scene.add(lantern);
-
-        // Floor Grid
         const grid = new THREE.GridHelper(20, 20, 0x38bdf8, 0x1e293b);
         grid.position.y = -1;
         scene.add(grid);
 
-        // 4D Toggle Logic (Day/Night & Lantern Emissive Glow)
+        const activeMeshes = new Map();
+
+        function createMeshForCategory(category) {
+            let geometry, material;
+            if (category === "Lantern") {
+                geometry = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 16);
+                material = new THREE.MeshStandardMaterial({ color: 0xd9381e, roughness: 0.3 });
+            } else if (category === "Pagoda") {
+                geometry = new THREE.ConeGeometry(1.2, 2.0, 4);
+                material = new THREE.MeshStandardMaterial({ color: 0xeab308, roughness: 0.5 });
+            } else {
+                geometry = new THREE.BoxGeometry(1, 1, 1);
+                material = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.4 });
+            }
+            return new THREE.Mesh(geometry, material);
+        }
+
+        async function syncSceneGraph() {
+            try {
+                const res = await fetch('http://127.0.0.1:3000/api/scene');
+                const nodes = await res.json();
+                
+                document.getElementById('status').innerText = "Connected (Authoritative Server)";
+                document.getElementById('status').style.color = "#4ade80";
+                document.getElementById('json-stream').innerText = JSON.stringify(nodes, null, 2);
+
+                nodes.forEach(node => {
+                    if (!activeMeshes.has(node.object_id)) {
+                        const mesh = createMeshForCategory(node.object_category);
+                        mesh.position.set(node.position.x, node.position.y, node.position.z);
+                        mesh.scale.set(node.scale.x, node.scale.y, node.scale.z);
+                        scene.add(mesh);
+                        activeMeshes.set(node.object_id, mesh);
+                    }
+                });
+            } catch (err) {
+                document.getElementById('status').innerText = "Offline (Start Rust Server)";
+                document.getElementById('status').style.color = "#f87171";
+            }
+        }
+
+        setInterval(syncSceneGraph, 1500);
+        syncSceneGraph();
+
+        document.getElementById('spawn-btn').addEventListener('click', async () => {
+            const count = activeMeshes.size + 1;
+            const categories = ["Lantern", "Pagoda", "Box"];
+            const cat = categories[count % categories.length];
+            const newNode = {
+                object_id: `${cat.toLowerCase()}_00${count}`,
+                object_category: cat,
+                object_caption: `Procedurally generated ${cat}`,
+                supported_by: "FLOOR",
+                position: { x: (Math.random() - 0.5) * 8, y: 0, z: (Math.random() - 0.5) * 8 },
+                scale: { x: 1.0, y: 1.0, z: 1.0 },
+                orientation: { x: 0.0, y: 0.0, z: 0.0 },
+                lighting_state: "Day"
+            };
+
+            await fetch('http://127.0.0.1:3000/api/spawn', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newNode)
+            });
+            syncSceneGraph();
+        });
+
         let isNight = false;
         document.getElementById('toggle-time').addEventListener('click', () => {
             isNight = !isNight;
@@ -70,24 +122,29 @@
                 scene.background.set(0x020617);
                 ambientLight.intensity = 0.1;
                 dirLight.intensity = 0.2;
-                material.emissive.set(0xff4422); // Lantern lights up at night[span_4](start_span)[span_4](end_span)[span_5](start_span)[span_5](end_span)
-                material.emissiveIntensity = 0.9;
+                activeMeshes.forEach(mesh => {
+                    if (mesh.material.emissive) {
+                        mesh.material.emissive.set(0xff4422);
+                        mesh.material.emissiveIntensity = 0.8;
+                    }
+                });
                 document.getElementById('toggle-time').innerText = "Switch to Day Mode";
-                document.getElementById('json-stream').innerText = JSON.stringify({ object_id: "lantern_001", lighting: "Night (Lit)" }, null, 2);
             } else {
                 scene.background.set(0x0f172a);
                 ambientLight.intensity = 0.8;
                 dirLight.intensity = 1.2;
-                material.emissive.set(0x000000); // Lights turn off in the day[span_6](start_span)[span_6](end_span)[span_7](start_span)[span_7](end_span)
+                activeMeshes.forEach(mesh => {
+                    if (mesh.material.emissive) {
+                        mesh.material.emissive.set(0x000000);
+                    }
+                });
                 document.getElementById('toggle-time').innerText = "Switch to Night Mode (4D)";
-                document.getElementById('json-stream').innerText = JSON.stringify({ object_id: "lantern_001", lighting: "Day" }, null, 2);
             }
         });
 
-        // Animation Loop
         function animate() {
             requestAnimationFrame(animate);
-            lantern.rotation.y += 0.005;
+            activeMeshes.forEach(mesh => mesh.rotation.y += 0.005);
             renderer.render(scene, camera);
         }
         animate();

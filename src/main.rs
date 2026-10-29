@@ -1,15 +1,21 @@
 mod parser;
 
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 use serde::{Deserialize, Serialize};
+use tower_http::cors::CorsLayer;
+use std::sync::{Arc, Mutex};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Vector3D {
     pub x: f32,
     pub y: f32,
     pub z: f32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SceneNode {
     pub object_id: String,
     pub object_category: String,
@@ -18,31 +24,54 @@ pub struct SceneNode {
     pub position: Vector3D,
     pub scale: Vector3D,
     pub orientation: Vector3D,
+    pub lighting_state: String,
 }
 
-fn main() {
-    println!("Initializing Spatial Engine Core Parser...");
+#[derive(Clone)]
+struct AppState {
+    nodes: Arc<Mutex<Vec<SceneNode>>>,
+}
 
-    // Sample spatial JSON payload simulating LLM scene generation output
-    let sample_json = r#"{
-        "object_id": "lantern_001",
-        "object_category": "Lantern",
-        "object_caption": "A traditional red lantern with intricate carvings",
-        "supported_by": "FLOOR",
-        "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
-        "scale": { "x": 1.0, "y": 1.0, "z": 1.0 },
-        "orientation": { "x": 0.0, "y": 0.0, "z": 0.0 }
-    }"#;
+#[tokio::main]
+async fn main() {
+    println!("Starting Spatial Engine Authoritative Server on port 3000...");
 
-    match serde_json::from_str::<SceneNode>(sample_json) {
-        Ok(node) => {
-            println!("Successfully parsed entity: {}", node.object_id);
-            // Validate scale directly using the parser module namespace
-            match parser::validate_scale(node.scale.x, node.scale.y, node.scale.z) {
-                Ok(()) => println!("Scale validation passed: dimensions are valid."),
-                Err(e) => eprintln!("Scale validation failed: {}", e),
+    let initial_node = SceneNode {
+        object_id: "lantern_001".to_string(),
+        object_category: "Lantern".to_string(),
+        object_caption: "A traditional red lantern with intricate carvings".to_string(),
+        supported_by: "FLOOR".to_string(),
+        position: Vector3D { x: 0.0, y: 0.0, z: 0.0 },
+        scale: Vector3D { x: 1.0, y: 1.0, z: 1.0 },
+        orientation: Vector3D { x: 0.0, y: 0.0, z: 0.0 },
+        lighting_state: "Day".to_string(),
+    };
+
+    let state = AppState {
+        nodes: Arc::new(Mutex::new(vec![initial_node])),
+    };
+
+    let state_get = state.clone();
+    let state_post = state.clone();
+
+    let app = Router::new()
+        .route("/api/scene", get(move || async move {
+            let nodes = state_get.nodes.lock().unwrap();
+            Json(nodes.clone())
+        }))
+        .route("/api/spawn", post(move |Json(payload): Json<SceneNode>| async move {
+            if let Ok(()) = parser::validate_scale(payload.scale.x, payload.scale.y, payload.scale.z) {
+                let mut nodes = state_post.nodes.lock().unwrap();
+                nodes.push(payload.clone());
+                Json(serde_json::json!({ "status": "success", "node": payload }))
+            } else {
+                Json(serde_json::json!({ "status": "error", "message": "Invalid scale dimensions" }))
             }
-        }
-        Err(err) => eprintln!("Failed to parse spatial JSON payload: {}", err),
-    }
+        }))
+        .layer(CorsLayer::permissive());
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    println!("Spatial Engine API live at http://127.0.0.1:3000/api/scene");
+    
+    axum::serve(listener, app).await.unwrap();
 }

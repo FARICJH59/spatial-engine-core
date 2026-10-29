@@ -15,13 +15,21 @@
         #canvas-container { width: 100vw; height: 100vh; }
         .status-row { font-size: 12px; color: #94a3b8; margin-bottom: 8px; }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Import Three.js and GLTFLoader via ES Modules -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+        }
+      }
+    </script>
 </head>
 <body>
     <div id="hud">
         <h3>Spatial Engine 4D Telemetry</h3>
         <div class="status-row">Backend: <span id="status" style="color: #4ade80;">Connected (Authoritative)</span></div>
-        
+
         <!-- LLM Prompt Input Console -->
         <div style="margin-bottom: 8px;">
             <label style="font-size: 11px; color: #38bdf8; font-weight: bold;">GENERATIVE PROMPT INGESTION</label>
@@ -34,7 +42,10 @@
     </div>
     <div id="canvas-container"></div>
 
-    <script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x090d16);
 
@@ -58,8 +69,9 @@
         scene.add(grid);
 
         const activeMeshes = new Map();
+        const gltfLoader = new GLTFLoader();
 
-        function createMeshForCategory(category) {
+        function createFallbackPrimitive(category) {
             let geometry, material;
             if (category === "Shrine" || category === "Monolith") {
                 geometry = new THREE.BoxGeometry(1.2, 2.2, 1.2);
@@ -78,18 +90,36 @@
             try {
                 const res = await fetch('http://127.0.0.1:3000/api/scene');
                 const nodes = await res.json();
-                
+
                 document.getElementById('status').innerText = "Connected (Authoritative Server)";
                 document.getElementById('status').style.color = "#4ade80";
                 document.getElementById('json-stream').innerText = JSON.stringify(nodes, null, 2);
 
                 nodes.forEach(node => {
                     if (!activeMeshes.has(node.object_id)) {
-                        const mesh = createMeshForCategory(node.object_category);
-                        mesh.position.set(node.position.x, node.position.y, node.position.z);
-                        mesh.scale.set(node.scale.x, node.scale.y, node.scale.z);
-                        scene.add(mesh);
-                        activeMeshes.set(node.object_id, mesh);
+                        if (node.asset_url) {
+                            // Load real 3D model if asset URL is present
+                            gltfLoader.load(node.asset_url, (gltf) => {
+                                const model = gltf.scene;
+                                model.position.set(node.position.x, node.position.y, node.position.z);
+                                model.scale.set(node.scale.x, node.scale.y, node.scale.z);
+                                scene.add(model);
+                                activeMeshes.set(node.object_id, model);
+                            }, undefined, (error) => {
+                                console.error('Error loading GLTF asset, falling back to primitive:', error);
+                                const fallback = createFallbackPrimitive(node.object_category);
+                                fallback.position.set(node.position.x, node.position.y, node.position.z);
+                                scene.add(fallback);
+                                activeMeshes.set(node.object_id, fallback);
+                            });
+                        } else {
+                            // Default fallback primitive rendering
+                            const mesh = createFallbackPrimitive(node.object_category);
+                            mesh.position.set(node.position.x, node.position.y, node.position.z);
+                            mesh.scale.set(node.scale.x, node.scale.y, node.scale.z);
+                            scene.add(mesh);
+                            activeMeshes.set(node.object_id, mesh);
+                        }
                     }
                 });
             } catch (err) {
@@ -136,21 +166,25 @@
                 scene.background.set(0x020617);
                 ambientLight.intensity = 0.1;
                 dirLight.intensity = 0.2;
-                activeMeshes.forEach(mesh => {
-                    if (mesh.material.emissive) {
-                        mesh.material.emissive.set(0xff4422);
-                        mesh.material.emissiveIntensity = 0.8;
-                    }
+                activeMeshes.forEach(obj => {
+                    obj.traverse(child => {
+                        if (child.material && child.material.emissive) {
+                            child.material.emissive.set(0xff4422);
+                            child.material.emissiveIntensity = 0.8;
+                        }
+                    });
                 });
                 document.getElementById('toggle-time').innerText = "Switch to Day Mode";
             } else {
                 scene.background.set(0x090d16);
                 ambientLight.intensity = 0.7;
                 dirLight.intensity = 1.2;
-                activeMeshes.forEach(mesh => {
-                    if (mesh.material.emissive) {
-                        mesh.material.emissive.set(0x000000);
-                    }
+                activeMeshes.forEach(obj => {
+                    obj.traverse(child => {
+                        if (child.material && child.material.emissive) {
+                            child.material.emissive.set(0x000000);
+                        }
+                    });
                 });
                 document.getElementById('toggle-time').innerText = "Switch to 4D Night Mode (Lit)";
             }
@@ -158,7 +192,7 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            activeMeshes.forEach(mesh => mesh.rotation.y += 0.005);
+            activeMeshes.forEach(obj => obj.rotation.y += 0.005);
             renderer.render(scene, camera);
         }
         animate();
